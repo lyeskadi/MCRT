@@ -11,7 +11,7 @@ branching_ratio = Afl/(Afl+Avuv);
 TSfile = 'TS2';
 %TScase = 'half';
 useOpacity = 0;
-Nparticles = 1e4;
+Nparticles = 1e5;
 nground = 5e19;
 
 % Run MC for each half separately (like OES analysis)
