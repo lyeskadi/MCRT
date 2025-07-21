@@ -5,17 +5,18 @@ clear all
 doPlot = 1;
 save_cdf = 0;
 
+emitting_state = 11; % 31P = 11;
 filename = 'TSdata_OES_TS2';
 TScase = 'half';
 useOpacity = 1;
 
-% Call CRM to provide n31p
-[radius, n31p] = CRM_emissivity_radialprofile(filename,1,TScase,useOpacity); % Radial profile of 31p density based on TS data
+% Call CRM to provide n_emitting
+[radius, n_emitting] = CRM_emissivity_radialprofile_old(emitting_state,filename,1,TScase,useOpacity); % Radial profile of 31p density based on TS data
 
-% PDF(r) ~ r*n31p to account for cylindrical geometry
-%profile = radius.*n31p';
+% PDF(r) ~ r*n_emitting to account for cylindrical geometry
+%profile = radius.*n_emitting';
 
-profile = @(r) r.*interp1(radius,n31p',r);
+profile = @(r) r.*interp1(radius,n_emitting',r);
 normalization = integral(profile,0,max(radius));
 pdf = @(r) profile(r)/normalization;
 

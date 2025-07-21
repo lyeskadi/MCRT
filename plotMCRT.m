@@ -3,6 +3,7 @@ close all
 clear all
 %% General params
 L_RAID = 1.5;
+emitting_state = 11; % 31P = 11
 Afl = 13372000;
 Avuv = 566340000;
 branching_ratio = Afl/(Afl+Avuv);
@@ -15,8 +16,8 @@ Nparticles = 1e5;
 nground = 5e19;
 
 % Run MC for each half separately (like OES analysis)
-[emission_radius, escapeproba] = MCRT(nground,branching_ratio,TSfile,Nparticles,'half',useOpacity);
-[emission_radius_neg, escapeproba_neg] = MCRT(nground,branching_ratio,TSfile,Nparticles,'neghalf',useOpacity);
+[emission_radius, escapeproba] = MCRT(emitting_state,nground,branching_ratio,TSfile,Nparticles,'half',useOpacity);
+[emission_radius_neg, escapeproba_neg] = MCRT(emitting_state,nground,branching_ratio,TSfile,Nparticles,'neghalf',useOpacity);
 
 emission_radius(isnan(emission_radius)) = [];
 emission_radius_neg(isnan(emission_radius_neg)) = [];

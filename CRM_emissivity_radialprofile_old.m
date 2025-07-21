@@ -4,7 +4,7 @@
 %clear all
 
 % Returns normalized profile
-function [radius, profile] = CRM_emissivity_radialprofile(TSfilename,doPlot,TScase,useOpacity)
+function [radius, profile] = CRM_emissivity_radialprofile_old(emitting_state,TSfilename,doPlot,TScase,useOpacity)
 if nargin < 2 doPlot = 0; end
 if nargin < 3 TScase = 'half'; end
 if nargin < 4 useOpacity = 0; end
@@ -40,15 +40,15 @@ c.settings.THe_K = 1e3;
 
 for i = 1:length(ne)
     c.run(ne(i),Te(i));
-    n31p(i) = c.densities('31p');
+    n_emitting(i) = c.densities(emitting_state);
 end
 
-profile = n31p./max(n31p);
+profile = n_emitting./max(n_emitting);
 
 % Plot the profile and compare to ne, Te
 if doPlot
 figure; hold on; grid on;
-plot(radius,n31p/max(n31p))
+plot(radius,n_emitting/max(n_emitting))
 plot(radius,ne/max(ne))
 plot(radius,Te/max(Te))
 legend('n_{31P}','ne','Te')

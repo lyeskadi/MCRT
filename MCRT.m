@@ -1,5 +1,5 @@
 % Monte Carlo radiative transfer simulation
-function [emission_radius, escapeproba] = MCRT(nground,branching_ratio,TSfile, Nparticles,TScase,useOpacity)
+function [emission_radius, escapeproba] = MCRT(emitting_state,nground,branching_ratio,TSfile, Nparticles,TScase,useOpacity)
 % Load sampling of T(rho) CDF^-1, used to generate the distance a photon travels before absorption
 s=load('sampling.mat'); % cftval, invcftval
 cftval = s.cftval;
@@ -39,7 +39,7 @@ emission_pos = [];
 emission_radius = [];
 
 % Absorption strength, 1/k0 ~ mean free path
-[~,k0] = Trho(11,1,nground,THe,1);
+[~,k0] = Trho(emitting_state,1,nground,THe,1);
 
 % Initial positions drawn from emissivity profile determined by TS data
 initial_emission_positions = haloMC_initialize_plasmacolumn(filename,Nparticles,L_RAID,TScase,useOpacity); % Returns points according to emissivity profile predicted for TS data
