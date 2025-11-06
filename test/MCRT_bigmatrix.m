@@ -1,0 +1,330 @@
+% Test big matrix nullspace solve
+
+% 2025.10.11
+% Main problem currently: decay is too fast in the center, for both TS2 and TS3
+% CRM RT vs noRT profiles look OK, nothing obviously wrong
+% RT poplevels are ~ halfway between noRT and Escape factor poplevels: seems reasonable
+% Possible issue: sum(Grr_21p(:,1)) =? fraction of photons emitted at center and absorbed anywhere
+% [T,k0] = Trho(5,1,nHe,THe,0.2) = 0.37% should escape => >99% absorbed, whereas sum(Grr_21p(:,1)) = 54% reabsorbed
+% Check, geometric factors might explain it but looks sketchy 
+% Also Grr(i,i) ~ T(dr), which looks OK at first sight, but shouldn't it be T(dr/2)?
+
+% 2025.11.06
+% Went through code, no obvious problems, though agreement with exp data still not very good
+% Too narrow in center in almost all conditions, but not too bad outside -> Difficult to imagine that model is completely wrong, p.ex no 1/r missing (such big changes give completely different results)
+
+% => Maybe some physics is missing?
+% 1. Maybe include drop of ground state density inside plasma column?
+%-> Simple version: run crm with noRT conditions, gives you the n1 profile
+% Adding RT does not change plasma density much -> does not change n1 much
+
+% 2. Maybe explicitly resolving photon frequencies within Doppler spectrum would help? Unclear if different from Holstein
+
+% Interesting to see: popratio = poplevels./poplevels_noRT -> RT affects 21P by largest proportion, then 31P,41P but also other S and D states significantly
+% Also shows that ion density is affected to ~10-20% inside plasma column, just like divertor papers claimed
+% However, plasma density is significantly increased at the plasma edge -> RT widens the plasma column to some extent
+
+clear all
+close all
+
+nHe = 3e19;
+Grr_filename = ['Grr_data_nHe' num2str(nHe) '_Nbins_100_Npoints1e+07.mat']; %  'noVolumescaling' 
+load(Grr_filename);%'Grr_data_nHe5e+19_Nbins_100_Npoints1e+07.mat'
+
+TScase = 'TS3';
+
+R_RAID = 0.2;
+%Nradialbins = 30;
+%Grr_scaling_factor = 4e6; % Temporary before actual Grr is implemented, indicates strength of reabsorption effect
+%Grr = Grr_scaling_factor*ones(Nradialbins);%*makeGrr(Nradialbins); %1e0*ones(Nradialbins); % TODO: replace with G from theory. Uniform G might be invalid, could cause issues with nullspace
+
+c = crm();
+c.settings.resolve_ions = 0;
+c.settings.enable_ions = 1; % 2025.10.11 IMPORTANT!!! Otherwise much more peaked profile in the center
+c.settings.enableOpacity = 0;
+c.nHe = nHe; % (No effect as expected)
+c.settings.THe_K = 1000;
+%c.settings.methodEIE = 'accurate';
+%tic;
+c.run(2e12,4); % About 0.2 sec with opacity, 80msec without (Goto maybe 3 msec)
+%toc;
+Nstates = length(c.densities);
+
+%% Load TS data and prepare inputs to CRM
+load(['/home/lyes/Documents/PhD/Thesis/TS/matfiles/', 'TSdata_OES_', TScase, '.mat']);
+data.Radius=data.Radius-5; % Shift to have highest ne,Te at r=0, added 11.10.2025
+data = data(data.Temperature >= 0.5,:); % Remove points at too low Te where CRMs do not work
+
+% Positive half of TS data
+data_pos = data(data.Radius >= 0,:); % Use only half the TS profile at a time due to cylindrical symmetry
+nedata = data_pos.Density*1e-6;
+Tedata = data_pos.Temperature;
+radiusTS = data_pos.Radius*1e-3;
+radius = linspace(0,R_RAID,Nradialbins);
+radius_inplasma = radius(radius < max(abs(radiusTS)));
+nevals = interp1(radiusTS,nedata,radius_inplasma);
+Tevals = interp1(radiusTS,Tedata,radius_inplasma);
+
+% 2025.11.06 Add negative half of TS data (easy version now, refactor later)
+data_neg = flipud(data(data.Radius <= 0,:)); % Use negative half, flip row order to have increasing abs(radius)
+nedata_neg = data_neg.Density*1e-6;
+Tedata_neg = data_neg.Temperature;
+radiusTS_neg = -data_neg.Radius*1e-3;
+%radius = linspace(0,R_RAID,Nradialbins);
+radius_inplasma_neg = radius(radius < max(abs(radiusTS_neg)));
+nevals_neg = interp1(radiusTS_neg,nedata_neg,radius_inplasma_neg);
+Tevals_neg = interp1(radiusTS_neg,Tedata_neg,radius_inplasma_neg);
+
+%% Run CRM
+fullmatrix = sparse(Nradialbins*Nstates,Nradialbins*Nstates);
+densities_noRT = zeros(Nstates,Nradialbins);
+fullmatrix_neg = sparse(Nradialbins*Nstates,Nradialbins*Nstates);
+densities_noRT_neg = zeros(Nstates,Nradialbins);
+
+
+% Create ratematrix for no plasma conditions (where TS data not available)
+RateMatrix_noplasma = c.processes.rateMatrixSE - diag(sum(c.processes.rateMatrixSE));
+% Problem: no coupling of 21s to ground state, messes up nullspace 
+% (every particle ends up stuck in 21s because no deexcitation process to 11s exists)
+% Physical reality: neutral collisions likely become dominant if plasma is absent
+% -> Add some small artifical coupling
+% Fortunately profiles are indep of exact value as long as reasonable value is given
+
+coupling_21s = 1e2; % [s^-1], artifical deexcitation rate 21s->11s
+RateMatrix_noplasma(1,3) = coupling_21s;
+RateMatrix_noplasma(3,3) = -coupling_21s;
+
+% Positive half
+for i = 1:Nradialbins
+   startind = 1+(i-1)*Nstates;
+   endind = i*Nstates;
+   
+   % If bin is inside plasma, run CRM
+   if radius(i) < radius_inplasma(end) 
+       c.run(nevals(i),Tevals(i));
+       fullmatrix(startind:endind,startind:endind) = c.RateMatrix;  
+       densities_noRT(:,i) = c.densities;
+       
+   % If bin is outside plasma, only include SE    
+   else                                
+       fullmatrix(startind:endind,startind:endind) = RateMatrix_noplasma;
+       densities_noRT(1,i) = nHe; % Everything is in ground state outside plasma column if no RT
+   end
+end
+
+% Negative half
+for i = 1:Nradialbins
+   startind = 1+(i-1)*Nstates;
+   endind = i*Nstates;
+   
+   % If bin is inside plasma, run CRM
+   if radius(i) < radius_inplasma_neg(end) 
+       c.run(nevals_neg(i),Tevals_neg(i));
+       fullmatrix_neg(startind:endind,startind:endind) = c.RateMatrix;  
+       densities_noRT_neg(:,i) = c.densities;
+   % If bin is outside plasma, only include SE    
+   else                                
+       fullmatrix_neg(startind:endind,startind:endind) = RateMatrix_noplasma;
+       densities_noRT_neg(1,i) = nHe; % Everything is in ground state outside plasma column if no RT
+   end
+end
+
+% 2025.11.03 Extra stuff for troubleshooting
+poplevels_noRT = densities_noRT/nHe; % Only used for troubleshooting
+cOEF = c;
+cOEF.settings.enableOpacity = 1;
+cOEF.run(nevals(1),Tevals(1));
+disp('1. Check matrix without photoexcitation')
+checkMatrix(fullmatrix)
+
+
+tic;
+%% Add photoexcitation
+% photoexc_matrix = sparse(Nstates,Nstates);
+% photoexc_matrix(5,5) = 1; % Increases 21p density proportionally to 21p density at another position
+% photoexc_matrix(11,11) = 1;
+% photoexc_matrix(19,19) = 1;
+% 
+% photoexc_matrix(1,5) = -1; 
+% photoexc_matrix(1,11) = -1;
+% photoexc_matrix(1,19) = -1;
+
+% disp('2. Check photoexcitation matrix')
+% checkMatrix(photoexc_matrix)
+
+blocksize = Nstates;
+
+% Get SE rates towards ground state
+A21p = c.processes.rateMatrixSE(1,5);
+A31p = c.processes.rateMatrixSE(1,11);
+A41p = c.processes.rateMatrixSE(1,19);
+
+for blockrow = 1:Nradialbins
+    for blockcol = 1:Nradialbins     
+        % Build photoexcitation matrix
+        photoexc_matrix = sparse(Nstates,Nstates);
+        photoexc_matrix(5,5) = A21p*Grr_21p(blockrow,blockcol); % Increases 21p density proportionally to 21p density at another position
+        photoexc_matrix(11,11) = A31p*Grr_31p(blockrow,blockcol);
+        photoexc_matrix(19,19) = A41p*Grr_41p(blockrow,blockcol);
+
+        photoexc_matrix(1,5) = -A21p*Grr_21p(blockrow,blockcol); 
+        photoexc_matrix(1,11) = -A31p*Grr_31p(blockrow,blockcol);
+        photoexc_matrix(1,19) = -A41p*Grr_41p(blockrow,blockcol);
+        
+        % 2025.11.01 Try to see if issue with 1/r missing in reaction rate
+        %dr = radius(2)-radius(1);
+        %photoexc_matrix = photoexc_matrix/(radius(blockrow)+dr/2);
+        
+        % Insert photoexcitation matrix into correct block of full matrix
+        startind_row = 1+(blockrow-1)*blocksize;
+        startind_col = 1+(blockcol-1)*blocksize;
+        fullmatrix(startind_row:(startind_row+blocksize-1),startind_col:(startind_col+blocksize-1)) = photoexc_matrix + fullmatrix(startind_row:(startind_row+blocksize-1),startind_col:(startind_col+blocksize-1));
+        fullmatrix_neg(startind_row:(startind_row+blocksize-1),startind_col:(startind_col+blocksize-1)) = photoexc_matrix + fullmatrix_neg(startind_row:(startind_row+blocksize-1),startind_col:(startind_col+blocksize-1));
+
+    end
+end
+
+disp('3. Check full matrix with photoexcitation')
+checkMatrix(fullmatrix)
+
+% Remark: if this takes long, cut time in half by using Grr' = Gr'r? or smth like this, check when G is done
+
+%% Find the nullspace
+
+%fulldensity = null(fullmatrix); 
+%28.08: Seems ok without photoexc (Grr=0) but not 1d nullspace with it -> maybe recheck particle conservation etc 
+% null() does not work with sparse matrices
+
+% Find the convenient basis for the nullspace such that each column respresents a density vector in at a single radial position
+
+% fulldensity_rotated = rotate_to_block_local(fulldensity, Nstates, Nradialbins);
+% 
+% % Check that result is indeed part of nullspace
+% check_fulldensity = fullmatrix*fulldensity;
+% check_fulldensity_rotated = fullmatrix*fulldensity_rotated;
+% %[fulldensity,~] = eigs(fullmatrix,1,1e-12); %null(fullmatrix);
+% toc;
+
+%% Mistral
+
+% --- Constrained Solve ---
+% Construct constraint matrix: sum of densities at each position = 1 (or any fixed value)
+B = zeros(Nradialbins, Nradialbins*Nstates);
+for i = 1:Nradialbins
+    rows = (1:Nstates) + (i-1)*Nstates;
+    B(i, rows) = 1;
+end
+% Augmented system: [A; B] * n = [0; ones(Nradialbins,1)]
+Aug = [fullmatrix; B];
+b = [zeros(Nradialbins*Nstates, 1); ones(Nradialbins, 1)];
+% Solve
+n = Aug \ b;
+% Reshape to get density vectors at each position
+poplevels = reshape(n, Nstates, Nradialbins);
+
+% Negative half
+Aug_neg = [fullmatrix_neg; B];
+n_neg = Aug_neg \ b;
+poplevels_neg = reshape(n_neg, Nstates, Nradialbins);
+
+
+%% Plot 31P profile
+plotstate = 10;
+
+profile = poplevels(plotstate,:);
+profile_noRT = densities_noRT(plotstate,:);
+profile_neg = poplevels_neg(plotstate,:);
+profile_noRT_neg = densities_noRT_neg(plotstate,:);
+% 2025.10.11 Check if possible issues with jacobian
+% -> Nope, probably not the issue
+% jacobian = radius+(radius(2)-radius(1))/2;
+% profile = profile.*jacobian;
+% profile_noRT = profile_noRT.*jacobian;
+
+profile = profile/max(profile);
+profile_noRT = profile_noRT/max(profile_noRT);
+profile_neg = profile_neg/max(profile_neg);
+profile_noRT_neg = profile_noRT_neg/max(profile_noRT_neg);
+
+% Preliminary plot, not needed anymore
+%{
+figure; hold on;
+plot(radius,profile)
+plot(radius,profile_noRT)
+plot(-flip(radius),flip(profile_neg))
+plot(-flip(radius),flip(profile_noRT_neg))
+%title(['Grr scaling factor = ', num2str(Grr_scaling_factor,'%.2g')])
+legend([c.getname(plotstate),' With RT'], [c.getname(plotstate),' No RT'])
+%}
+%% Compare to OES profile
+color_init = 0.2*[1 1 1];
+color_RT = [0.83 0 0];
+color_OES = [0.13 0.55 0.13];
+
+load(['OESdata_', TScase ,'_full.mat']);
+%r502 = r502;
+%r389 = r389;
+
+switch plotstate
+    case 11 % 31P-21S
+        OESemissivity = f_rec502/max(f_rec502);
+        OESradius = r502;
+        OESwavelength = 502;
+    case 10 % 31D-21P
+        OESemissivity = f_rec668/max(f_rec668);
+        OESradius = r668;
+        OESwavelength = 668;
+    case 8 % 33P-23S
+        OESemissivity = f_rec389/max(f_rec389);
+        OESradius = r389;
+        OESwavelength = 389;
+    case 9 % 33D-23P (31D-23P has same wavelength but much lower emissivity)
+        OESemissivity = f_rec588/max(f_rec588);
+        OESradius = r588;
+        OESwavelength = 588;
+end
+
+%OESemissivity502 = f_rec502/max(f_rec502); % Normalize area to 1
+% OESemissivity389 = f_rec389/trapz(r389,f_rec389');
+
+figure; hold on; box on;
+plot(OESradius,OESemissivity,'Linewidth',2,'Color',color_OES)
+hold on
+plot(radius*1000,profile_noRT,'Linewidth',1.2,'Color',color_init)
+plot(radius*1000,profile,'Linewidth',2,'Color',color_RT)
+
+plot(-flip(radius*1000),flip(profile_noRT_neg),'Linewidth',1.2,'Color',color_init)
+plot(-flip(radius*1000),flip(profile_neg),'Linewidth',2,'Color',color_RT)
+
+plot([-60 -60], [0 1],'k--')
+plot([60 60], [0 1],'k--')
+hold off
+set(gcf,'color','w')
+set(groot,'defaultAxesTickLabelInterpreter','latex');
+set(gca,'FontSize',17) %15
+xlim([-100,100])
+ylim([0, 1.3])
+
+legend(['OES ' num2str(OESwavelength) '\,nm'],'No RT','RT solution','Fontsize',17,'Interpreter','latex')
+xlabel('Radial position (mm)','Fontsize',21,'Interpreter','latex')
+ylabel('Intensity (arb)','Fontsize',21,'Interpreter','latex')
+
+% Display main settings in title
+Grrcase = strsplit(Grr_filename,'_');
+title([TScase ', ' Grrcase{3}],'Fontsize',17,'Interpreter','latex')
+%% Functions
+
+% Check for columns that do not sum to zero
+function checkMatrix(M)
+    colsums = full(sum(M,1)); % Convert to non-sparse for fprintf
+    fprintf('max abs column sum = %.3e\n', max(abs(colsums)));
+end
+
+%% TODO
+% 1. Resolve mfp by frequency
+    % add freq roll within Doppler lineshape (write as fct)
+    % calc mfp for given freq
+    % When rolling distance, input mfp associated to freq
+    % Reemitted freq: roll again from Doppler / Keep original one, try both and see if significant difference
+
+% 2. Write a fct called Grr_uniform(nHe,THe) that performs the MCRT sims for a given (uniform) neutral density profile

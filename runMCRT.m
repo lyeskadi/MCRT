@@ -1,32 +1,48 @@
 % Run MCRT.m and plot results
-close all
+%close all
 clear all
+
 %% General params
-L_RAID = 1.5;
+TSfile = 'TS2'; % Select RAID plasma condition
+L_RAID = 1.5; % RAID length
+load(['RTdata_sampling_OES_',TSfile,'.mat'])
+CRM = 'Cora'; % Choose between CoRa and GotoCRM
+
 emitting_state = 11; % 31P = 11
-absorbing_state = 1;
-Afl = 13372000;
-Avuv = 566340000;
-branching_ratio = Afl/(Afl+Avuv);
+absorbing_state = 1; % Normally ground state, but can try metastable as well
+lower_state = 3; % 21S = 3, lower state of the observed (visible) transition
+
+Afl = RTdata.rateMatrixSE(lower_state,emitting_state);
+Avuv = RTdata.rateMatrixSE(absorbing_state,emitting_state);
+branching_ratio = Afl/(Afl+Avuv); % !!! If choosing an emitting state where multiple 'fluorescence' transitions are significant, this might need refinement !!!
+
+switch CRM
+    case 'Cora'
+        invcdf_val_radialprofile_half = RTdata.invcdf_Cora_half{emitting_state};
+        invcdf_val_radialprofile_neghalf = RTdata.invcdf_Cora_neghalf{emitting_state};
+    case 'Goto'
+        invcdf_val_radialprofile_half = RTdata.invcdf_Goto_half{emitting_state};
+        invcdf_val_radialprofile_neghalf = RTdata.invcdf_Goto_neghalf{emitting_state};
+end
 
 %% Run MCRT
-TSfile = 'TS2';
+
 %TScase = 'half';
 useOpacity = 0;
-Nparticles = 1e5;
+Nparticles = 1e6;
 nground = 5e19;
 
 % Run MC for each half separately (like OES analysis)
-[emission_radius, escapeproba] = MCRT(emitting_state,absorbing_state,nground,branching_ratio,TSfile,Nparticles,'half',useOpacity);
-[emission_radius_neg, escapeproba_neg] = MCRT(emitting_state,absorbing_state,nground,branching_ratio,TSfile,Nparticles,'neghalf',useOpacity);
+[emission_radius, escapeproba, points_initial_emission] = MCRT_new(emitting_state,absorbing_state,nground,branching_ratio,Nparticles,RTdata.cdf_values,invcdf_val_radialprofile_half);
+[emission_radius_neg, escapeproba_neg, points_initial_emission_neg] = MCRT_new(emitting_state,absorbing_state,nground,branching_ratio,Nparticles,RTdata.cdf_values,invcdf_val_radialprofile_neghalf);
 
 emission_radius(isnan(emission_radius)) = [];
 emission_radius_neg(isnan(emission_radius_neg)) = [];
 %% Tally points
-filename = ['TSdata_OES_' TSfile];
-N_initialemission = 1e6; %floor(branching_ratio/(1-branching_ratio)*Nparticles); % Seems to be inaccurate (was due to low number of samples)
-points_initial_emission= haloMC_initialize_plasmacolumn(filename,N_initialemission,L_RAID,'half',useOpacity);%initial_emission_positions; %generateCylinderPoints(R_EXC,L_RAID,N_initialemission);
-points_initial_emission_neg= haloMC_initialize_plasmacolumn(filename,N_initialemission,L_RAID,'neghalf',useOpacity);
+%filename = ['TSdata_OES_' TSfile];
+%N_initialemission = 1e6; %floor(branching_ratio/(1-branching_ratio)*Nparticles); % Seems to be inaccurate (was due to low number of samples)
+%points_initial_emission= haloMC_initialize_plasmacolumn(filename,N_initialemission,L_RAID,'half',useOpacity);%initial_emission_positions; %generateCylinderPoints(R_EXC,L_RAID,N_initialemission);
+%points_initial_emission_neg= haloMC_initialize_plasmacolumn(filename,N_initialemission,L_RAID,'neghalf',useOpacity);
 
 radius_iem = sqrt(points_initial_emission(1,:).^2+points_initial_emission(2,:).^2);
 radius_iem_neg = sqrt(points_initial_emission_neg(1,:).^2+points_initial_emission_neg(2,:).^2);

@@ -1,9 +1,9 @@
 % Monte Carlo radiative transfer simulation
-function [emission_radius, escapeproba] = MCRT(emitting_state,absorbing_state,nground,branching_ratio,TSfile, Nparticles,TScase,useOpacity)
+function [emission_radius, escapeproba, initial_emission_positions] = MCRT_new(emitting_state,absorbing_state,nground,branching_ratio,Nparticles,cdf_val_radialprofile,invcdf_val_radialprofile)
 % Load sampling of T(rho) CDF^-1, used to generate the distance a photon travels before absorption
 s=load('sampling.mat'); % cftval, invcftval
-cftval = s.cftval;
-invcftval = s.invcftval;
+cftval_Trho = s.cftval;
+invcftval_Trho = s.invcftval;
 %TScase = 'half';
 %useOpacity = 1;
 
@@ -16,7 +16,7 @@ invcftval = s.invcftval;
 
 % Settings
 %TSfile = 'TS3';
-filename = ['TSdata_OES_', TSfile];%'He_LCIF';%'TSdata_OES_TS2'; % Name of Thomson scattering data file for plasma bkg
+%filename = ['TSdata_OES_', TSfile];%'He_LCIF';%'TSdata_OES_TS2'; % Name of Thomson scattering data file for plasma bkg
 %Nparticles = 1e6;
 R_RAID = 0.2; L_RAID = 1.5; % R_EXC=5e-2;
 
@@ -42,7 +42,7 @@ emission_radius = [];
 [~,k0] = Trho(emitting_state,absorbing_state,nground,THe,1);
 
 % Initial positions drawn from emissivity profile determined by TS data
-initial_emission_positions = haloMC_initialize_plasmacolumn(filename,Nparticles,L_RAID,TScase,useOpacity); % Returns points according to emissivity profile predicted for TS data
+initial_emission_positions = MCRT_initialize_plasmacolumn(Nparticles,L_RAID,cdf_val_radialprofile,invcdf_val_radialprofile); % Returns points according to emissivity profile predicted for TS data
 
 % We will assume that VUV is absorbed when hitting wall
 wall_absorption_pos = []; % Track where this happens
@@ -62,7 +62,7 @@ parfor i = 1:Nparticles
     
     while isVUV
         % Photon has been emitted, pick direction and distance 
-        dx = (1/k0)*pickTravelDistance(cftval,invcftval);
+        dx = (1/k0)*pickTravelDistance(cftval_Trho,invcftval_Trho);
         pos = pos+dir*dx; 
         if ~isInsideCylinder(pos,R_RAID,L_RAID)
             isVUV = 0; % Assume walls absorb the VUV
